@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""quattro-workstation: engine-layer CLI for Cinque Hyprland session management.
+
+Storage:
+  ~/.config/quattro-workstations/config.json
+  ~/.config/quattro-workstations/workstations/1.json .. 5.json
+
+See README.md next to this script for the JSON format.
+"""
+import configparser
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+NUM_SLOTS = 5
+
+# Desktop Entry Specification field codes: https://specifications.freedesktop.org/desktop-entry-spec/latest/exec-variables.html
+FIELD_CODE_RE = re.compile(r"%[fFuUdDnNickvm]")
+
+CONFIG_DIR = Path.home() / ".config" / "quattro-workstations"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+WORKSTATIONS_DIR = CONFIG_DIR / "workstations"
+
+
+def default_config():
+    return {"fluidSlot": None, "bootSlot": None}
+
+
+def default_workstation(n):
+    return {"id": n, "name": f"Workstation {n}", "mode": "preset", "commands": []}
+
+
+def ensure_initialized():
+    WORKSTATIONS_DIR.mkdir(parents=True, exist_ok=True)
+    if not CONFIG_FILE.exists():
+        write_json(CONFIG_FILE, default_config())
+    for n in range(1, NUM_SLOTS + 1):
+        path = workstation_path(n)
+        if not path.exists():
+            write_json(path, default_workstation(n))
+
+
+def workstation_path(n):
+    return WORKSTATIONS_DIR / f"{n}.json"
+
+
+def read_json(path):
+    with open(path) as f:
+        return json.load(f)
+
+
+def write_json(path, data):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    tmp.replace(path)
+
+
+def load_config():
+    cfg = read_json(CONFIG_FILE)
+    changed = False
+    for key, value in default_config().items():
+        if key not in cfg:
+            cfg[key] = value
+            changed = True
+    if changed:
+        write_json(CONFIG_FILE, cfg)
+    return cfg
+
+
+def save_config(cfg):
+    write_json(CONFIG_FILE, cfg)
+
+
+def load_workstation(n):
+    path = workstation_path(n)
+    if path.exists():
+        return read_json(path)
+    return default_workstation(n)
+
+
+def save_workstation(n, data):
+    write_json(workstation_path(n), data)
+
+
+def validate_slot(n):
+    if n < 1 or n > NUM_SLOTS:
+        print(f"error: slot must be between 1 and {NUM_SLOTS}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_list(args):
+    cfg = load_config()
+    fluid_slot = cfg.get("fluidSlot")
+    boot_slot = cfg.get("bootSlot")
+    for n in range(1, NUM_SLOTS + 1):
+        ws = load_workstation(n)
+        tags = []
+        tags.append("fluid (active)" if n == fluid_slot else ws.get("mode", "preset"))
+        if n == boot_slot:
+            tags.append("boots at startup")
+        print(f"{n}: {ws.get('name', f'Workstation {n}')} [{', '.join(tags)}]")
+
+
+def cmd_launch(args):
+    n = args.n
+    validate_slot(n)
+    ws = load_workstation(n)
+    for entry in ws.get("commands", []):
+        command = entry["command"]
+        workspace = entry["workspace"]
+        # This Hyprland build's config/dispatch layer is Lua-based (hl.dsp.*),
+        # not the classic "dispatch workspace <n>" string form.
+        subprocess.run(
+            ["hyprctl", "dispatch", f'hl.dsp.focus({{workspace="{workspace}"}})'],
+            check=False,
+        )
+        subprocess.Popen(
+            ["setsid", "nohup", "sh", "-c", command],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    print(f"launched workstation {n}: {ws.get('name', f'Workstation {n}')} ({len(ws.get('commands', []))} commands)")
+
+
+def cmd_fluid(args):
+    n = args.n
+    validate_slot(n)
+    cfg = load_config()
+    cfg["fluidSlot"] = n
+    save_config(cfg)
+    print(f"fluid slot set to {n}")
+
+
+def cmd_capture_fluid(args):
+    cfg = load_config()
+    fluid_slot = cfg.get("fluidSlot")
+    if not fluid_slot:
+        return
+
+    result = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        print("error: hyprctl clients -j failed", file=sys.stderr)
+        sys.exit(1)
+    clients = json.loads(result.stdout)
+
+    commands = []
+    seen_classes = set()
+    for client in clients:
+        cls = client.get("class", "")
+        if not cls or cls in seen_classes:
+            continue
+        seen_classes.add(cls)
+        workspace = client.get("workspace", {}).get("id")
+        if workspace is None:
+            continue
+        commands.append({"command": cls.lower(), "workspace": workspace})
+
+    existing = load_workstation(fluid_slot)
+    name = existing.get("name", f"Workstation {fluid_slot}")
+
+    save_workstation(fluid_slot, {
+        "id": fluid_slot,
+        "name": name,
+        "mode": "fluid",
+        "commands": commands,
+    })
+    print(f"captured {len(commands)} window(s) into fluid slot {fluid_slot}")
+
+
+def xdg_applications_dirs():
+    # $XDG_DATA_HOME/applications, then each $XDG_DATA_DIRS entry's
+    # /applications -- the standard XDG locations, in precedence order
+    # (earlier wins on a filename collision). This machine has nothing
+    # beyond /usr/share and ~/.local/share (no flatpak/snap), but reading
+    # XDG_DATA_DIRS rather than hardcoding picks those up automatically if
+    # installed later.
+    home_data = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    dirs = [Path(home_data) / "applications"]
+    data_dirs = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    for d in data_dirs.split(":"):
+        if d:
+            dirs.append(Path(d) / "applications")
+    return dirs
+
+
+def strip_exec_field_codes(exec_value):
+    stripped = FIELD_CODE_RE.sub("", exec_value)
+    stripped = stripped.replace("%%", "%")
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
+def parse_desktop_entry(path):
+    parser = configparser.RawConfigParser(strict=False, interpolation=None)
+    try:
+        with open(path, encoding="utf-8") as f:
+            parser.read_file(f)
+    except (OSError, UnicodeDecodeError, configparser.Error):
+        return None
+    if not parser.has_section("Desktop Entry"):
+        return None
+    section = parser["Desktop Entry"]
+    if section.get("Type", "Application") != "Application":
+        return None
+    if section.get("NoDisplay", "false").strip().lower() == "true":
+        return None
+    if section.get("Hidden", "false").strip().lower() == "true":
+        return None
+    name = section.get("Name", "").strip()
+    exec_raw = section.get("Exec", "").strip()
+    if not name or not exec_raw:
+        return None
+    command = strip_exec_field_codes(exec_raw)
+    if not command:
+        return None
+    return {"name": name, "command": command}
+
+
+def cmd_list_apps(args):
+    seen_filenames = set()
+    seen_entries = set()
+    apps = []
+    for app_dir in xdg_applications_dirs():
+        if not app_dir.is_dir():
+            continue
+        for entry_path in sorted(app_dir.glob("*.desktop")):
+            if entry_path.name in seen_filenames:
+                continue
+            seen_filenames.add(entry_path.name)
+            parsed = parse_desktop_entry(entry_path)
+            if not parsed:
+                continue
+            dedup_key = (parsed["name"], parsed["command"])
+            if dedup_key in seen_entries:
+                continue
+            seen_entries.add(dedup_key)
+            apps.append(parsed)
+    apps.sort(key=lambda a: a["name"].lower())
+    print(json.dumps(apps))
+
+
+def cmd_boot_slot(args):
+    n = args.n
+    validate_slot(n)
+    cfg = load_config()
+    cfg["bootSlot"] = n
+    save_config(cfg)
+    print(f"boot slot set to {n}")
+
+
+def cmd_boot(args):
+    cfg = load_config()
+    # bootSlot names the preset that should always launch at startup.
+    # fluidSlot is the separate "restore last session" concept, used as a
+    # fallback so `boot` still does something useful if no bootSlot is set.
+    slot = cfg.get("bootSlot") or cfg.get("fluidSlot")
+    if not slot:
+        return
+    cmd_launch(type("Args", (), {"n": slot})())
+
+
+def build_parser():
+    import argparse
+    parser = argparse.ArgumentParser(prog="quattro-workstation", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("list", help="print all 5 slots with name and fluid status").set_defaults(func=cmd_list)
+
+    p = sub.add_parser("launch", help="launch the given workstation slot")
+    p.add_argument("n", type=int, help="slot number 1-5")
+    p.set_defaults(func=cmd_launch)
+
+    p = sub.add_parser("fluid", help="mark the given slot as the fluid slot")
+    p.add_argument("n", type=int, help="slot number 1-5")
+    p.set_defaults(func=cmd_fluid)
+
+    sub.add_parser("capture-fluid", help="snapshot current windows into the fluid slot").set_defaults(func=cmd_capture_fluid)
+
+    p = sub.add_parser("boot-slot", help="mark the given slot to always launch at startup")
+    p.add_argument("n", type=int, help="slot number 1-5")
+    p.set_defaults(func=cmd_boot_slot)
+
+    sub.add_parser("boot", help="launch bootSlot, else fluidSlot, else no-op").set_defaults(func=cmd_boot)
+
+    sub.add_parser("list-apps", help="list installed apps as JSON [{name, command}], for building commands").set_defaults(func=cmd_list_apps)
+
+    return parser
+
+
+def main():
+    ensure_initialized()
+    parser = build_parser()
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "engine.cinque",
+  "name": "Cinque",
+  "version": "1.0.0",
+  "author": "Cinque",
+  "license": "MIT",
+  "description": "Quattro workstation session manager — switch between preset and fluid Hyprland workspace layouts from the bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Cinque",
+    "description": "Launch, boot-slot, and fluid-slot controls for the 5 Quattro workstation slots.",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "left"
+  }
+}
