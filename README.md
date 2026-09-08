@@ -137,8 +137,9 @@ same-named file in an earlier dir wins), skips `NoDisplay=true` /
 %N %i %c %k %v %m`) so `command` is directly runnable by `sh -c`. It's what
 the bar widget's Edit-view app picker calls.
 
-`launch` runs each command as `setsid nohup sh -c '<command>' </dev/null
->/dev/null 2>&1 &` so it survives the CLI process exiting, and switches to
+`launch` runs each command as `nohup sh -c '<command>' </dev/null
+>/dev/null 2>&1 &` (`start_new_session=True` on the Python side already detaches
+it into its own session, so it survives the CLI process exiting) and switches to
 each command's `workspace` before running it. For a multi-command slot, a
 background watcher also places each app's window on its target workspace
 once it actually appears — mainly by matching the spawned process's PID

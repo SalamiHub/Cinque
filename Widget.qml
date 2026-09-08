@@ -190,7 +190,7 @@ Panel {
     root.editCommands = copy
     root.newCmdValue = ""
     root.newCmdText = ""
-    root.newCmdWorkspace = 1
+    root.newCmdWorkspace = n
     if (appPicker) appPicker.value = ""
     root.view = "edit"
     root.refreshApps()

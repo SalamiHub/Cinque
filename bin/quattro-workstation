@@ -173,7 +173,7 @@ def cmd_launch(args):
             check=False,
         )
         proc = subprocess.Popen(
-            ["setsid", "nohup", "sh", "-c", command],
+            ["nohup", "sh", "-c", command],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
