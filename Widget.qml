@@ -618,13 +618,22 @@ Panel {
             }
 
             ScrollView {
+              id: detailScrollView
               Layout.fillWidth: true
               Layout.fillHeight: true
               clip: true
               ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+              // Without this, ScrollView's contentWidth defaults to the
+              // content's own implicit width -- which for a Repeater of
+              // unelided command Texts is however wide the longest one
+              // wants to be, not the panel's actual fixed width. That
+              // circularity is what let long commands overflow: elide had
+              // nothing to shrink against. Binding it to availableWidth
+              // breaks the loop and makes it the real clamp.
+              contentWidth: availableWidth
 
               ColumnLayout {
-                width: parent.width
+                width: detailScrollView.availableWidth
                 spacing: Style.space(4)
 
                 Repeater {
@@ -761,13 +770,16 @@ Panel {
             }
 
             ScrollView {
+              id: editScrollView
               Layout.fillWidth: true
               Layout.preferredHeight: Style.space(150)
               clip: true
               ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+              // See detailScrollView above -- same fix, same reason.
+              contentWidth: availableWidth
 
               ColumnLayout {
-                width: parent.width
+                width: editScrollView.availableWidth
                 spacing: Style.space(4)
 
                 Repeater {
