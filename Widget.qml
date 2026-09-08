@@ -634,6 +634,7 @@ Panel {
                     Layout.fillWidth: true
                     spacing: Style.space(8)
                     Text {
+                      id: detailCommandText
                       textFormat: Text.PlainText
                       text: modelData.command
                       color: root.foreground
@@ -641,12 +642,19 @@ Panel {
                       font.pixelSize: Style.font.caption
                       elide: Text.ElideRight
                       Layout.fillWidth: true
+                      Layout.minimumWidth: 0
+
+                      HoverHandler { id: detailCommandHover }
+                      ToolTip.visible: detailCommandHover.hovered && detailCommandText.truncated
+                      ToolTip.text: modelData.command
+                      ToolTip.delay: 500
                     }
                     Text {
                       text: "ws " + modelData.workspace
                       color: root.dim
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
+                      Layout.fillWidth: false
                     }
                   }
                 }
