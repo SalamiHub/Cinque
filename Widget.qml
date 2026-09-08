@@ -61,8 +61,17 @@ Panel {
   // time the edit view opens so newly installed apps show up without
   // restarting the shell.
   property var installedApps: []
+  // The empty-value entry is never in the picked/committed state on its own
+  // (addEditCommand's trim-and-check already no-ops on ""), it exists only
+  // so Dropdown's trigger has something other than blank to show before a
+  // real choice is made -- qs.Ui.Dropdown has no separate placeholder
+  // concept, its trigger just shows whichever option's label matches the
+  // current value.
   readonly property var appPickerOptions: {
-    var out = [{ value: root.customCommandValue, label: "Custom command…" }]
+    var out = [
+      { value: "", label: "Pick an app" },
+      { value: root.customCommandValue, label: "Custom command…" }
+    ]
     for (var i = 0; i < root.installedApps.length; i++) {
       var a = root.installedApps[i]
       out.push({ value: a.command, label: a.name, description: a.command })
@@ -529,7 +538,7 @@ Panel {
             ColumnLayout {
               Layout.fillWidth: true
               Layout.topMargin: Style.space(2)
-              spacing: Style.space(3)
+              spacing: Style.space(8)
 
               Text {
                 textFormat: Text.PlainText
@@ -601,7 +610,7 @@ Panel {
             PanelSeparator { Layout.fillWidth: true }
 
             Text {
-              text: "Commands"
+              text: "Apps"
               color: root.accentColor
               font.family: root.fontFamily
               font.pixelSize: Style.font.subtitle
@@ -736,7 +745,7 @@ Panel {
             PanelSeparator { Layout.fillWidth: true }
 
             Text {
-              text: "Commands"
+              text: "Apps"
               color: root.accentColor
               font.family: root.fontFamily
               font.pixelSize: Style.font.subtitle
@@ -800,12 +809,13 @@ Panel {
               Layout.fillWidth: true
               spacing: Style.space(4)
 
-              SearchableDropdown {
+              // Plain dropdown, not SearchableDropdown -- opens straight to
+              // the full scrollable option list, no filter field. That's
+              // deliberate: picking an app is a browse, not a search.
+              Dropdown {
                 id: appPicker
                 Layout.fillWidth: true
                 showLabel: false
-                placeholderText: "Choose an app…"
-                emptyText: root.installedApps.length === 0 ? "Loading…" : "No matches"
                 options: root.appPickerOptions
                 foreground: root.foreground
                 accent: root.accentColor
