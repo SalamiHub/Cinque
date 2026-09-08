@@ -138,7 +138,22 @@ same-named file in an earlier dir wins), skips `NoDisplay=true` /
 the bar widget's Edit-view app picker calls.
 
 `launch` runs each command as `setsid nohup sh -c '<command>' </dev/null
->/dev/null 2>&1 &` so it survives the CLI process exiting.
+>/dev/null 2>&1 &` so it survives the CLI process exiting, and switches to
+each command's `workspace` before running it. For a multi-command slot, a
+background watcher also places each app's window on its target workspace
+once it actually appears — mainly by matching the spawned process's PID
+tree, which is exact — so a slow-starting app doesn't end up wherever the
+*next* command's workspace switch already moved on to.
+
+**Known limitation:** that PID matching only works for apps `launch`
+actually starts. If a command's app is a singleton already running (a
+browser or editor already open, not freshly started), the new window gets
+handed to that *existing* process instead, which has no PID relationship to
+what `launch` spawned — placement then falls back to a weaker
+appearance-order heuristic, and if two such already-running apps in the
+same slot finish coming to the front in a different order than launched,
+their windows can end up swapped onto each other's target workspace.
+Freshly-started apps and single-command slots aren't affected.
 
 `capture-fluid` reads `hyprctl clients -j`, dedupes windows by `class`, and
 writes `<class-lowercased>` as a naive launch command for each — there's no

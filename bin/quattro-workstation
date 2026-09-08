@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 NUM_SLOTS = 5
@@ -106,27 +107,160 @@ def cmd_list(args):
         print(f"{n}: {ws.get('name', f'Workstation {n}')} [{', '.join(tags)}]")
 
 
+def hyprctl_clients():
+    result = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, check=False)
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        return []
+
+
+def client_addresses():
+    return set(c["address"] for c in hyprctl_clients() if "address" in c)
+
+
+def process_descendants(pid):
+    # All descendant PIDs of `pid` (children, grandchildren, ...), by
+    # walking /proc. `sh -c "<command>"` tail-execs into a single simple
+    # command (same PID), but not every command is that simple (e.g. one
+    # with "&&" or a wrapper script that forks), so a window can end up
+    # owned by a PID a level or two below the one we spawned.
+    parent_of = {}
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/stat") as f:
+                    stat = f.read()
+                ppid = int(stat[stat.rfind(")") + 2:].split()[1])
+                parent_of[int(entry)] = ppid
+            except (OSError, ValueError, IndexError):
+                continue
+    except OSError:
+        return set()
+    children_of = {}
+    for child, parent in parent_of.items():
+        children_of.setdefault(parent, []).append(child)
+    result = set()
+    frontier = [pid]
+    while frontier:
+        current = frontier.pop()
+        for child in children_of.get(current, []):
+            if child not in result:
+                result.add(child)
+                frontier.append(child)
+    return result
+
+
 def cmd_launch(args):
     n = args.n
     validate_slot(n)
     ws = load_workstation(n)
-    for entry in ws.get("commands", []):
+    commands = ws.get("commands", [])
+
+    before = client_addresses()
+    pids = []
+    for entry in commands:
         command = entry["command"]
         workspace = entry["workspace"]
-        # This Hyprland build's config/dispatch layer is Lua-based (hl.dsp.*),
-        # not the classic "dispatch workspace <n>" string form.
+        # Switching first gives the common case (a single command, or a
+        # fast-starting app) the same immediate "you're taken there" feel
+        # as before. This Hyprland build's dispatch layer is Lua-based
+        # (hl.dsp.*), not the classic "dispatch workspace <n>" string form.
         subprocess.run(
             ["hyprctl", "dispatch", f'hl.dsp.focus({{workspace="{workspace}"}})'],
             check=False,
         )
-        subprocess.Popen(
+        proc = subprocess.Popen(
             ["setsid", "nohup", "sh", "-c", command],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-    print(f"launched workstation {n}: {ws.get('name', f'Workstation {n}')} ({len(ws.get('commands', []))} commands)")
+        pids.append(proc.pid)
+
+    if commands:
+        # Corrective safety net for slower apps: a multi-command slot
+        # re-focuses for the NEXT command almost immediately, long before
+        # a typical app (especially anything Electron-based) has actually
+        # mapped a window -- so by the time it does, the active workspace
+        # has already moved on and the switch above did nothing for it.
+        # One detached watcher (not one per command) tracks every
+        # command's target workspace and spawned PID, and for each still
+        # tries a precise match first (a window whose owning process
+        # descends from the PID we spawned for it) before falling back to
+        # a weaker appearance-order heuristic for whatever's left --
+        # needed because a singleton app (a browser or editor already
+        # running) can hand the new window to its *existing* process
+        # instead of the one just spawned here, which has no PID
+        # relationship to it at all.
+        targets = [str(entry["workspace"]) for entry in commands]
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "_place-windows",
+             json.dumps(sorted(before)), json.dumps(targets), json.dumps(pids)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    print(f"launched workstation {n}: {ws.get('name', f'Workstation {n}')} ({len(commands)} commands)")
+
+
+def cmd_place_windows(args):
+    # Internal helper spawned by launch -- not a documented subcommand.
+    seen = set(json.loads(args.before))
+    targets = json.loads(args.targets)
+    pids = json.loads(args.pids)
+    pending = list(range(len(targets)))
+
+    def move(address, workspace):
+        subprocess.run(
+            ["hyprctl", "dispatch",
+             f'hl.dsp.window.move({{window="address:{address}", workspace="{workspace}", follow=false}})'],
+            check=False,
+        )
+
+    # Phase 1: precise PID-tree match, tried first since it's unambiguous
+    # -- correctly handles concurrent commands regardless of which one's
+    # app finishes starting first. Recomputes each pending command's
+    # descendant set every tick since the tree grows as the app forks.
+    deadline = time.monotonic() + 4.0
+    while pending and time.monotonic() < deadline:
+        clients = hyprctl_clients()
+        still_pending = []
+        for i in pending:
+            descendants = process_descendants(pids[i]) | {pids[i]}
+            match = next((c for c in clients if c.get("pid") in descendants and c.get("address") not in seen), None)
+            if match:
+                move(match["address"], targets[i])
+                seen.add(match["address"])
+            else:
+                still_pending.append(i)
+        pending = still_pending
+        if pending:
+            time.sleep(0.15)
+
+    # Phase 2 fallback: whatever's left is presumably a singleton app that
+    # handed its new window to an already-running process with no PID
+    # relationship to what we spawned. Assign newly-appeared windows, in
+    # the order they appear, to the still-pending targets in launch order.
+    # A heuristic, not a guarantee -- if two such apps finish starting in
+    # a different order than they were launched, their target workspaces
+    # can end up swapped between them -- but every window still lands on
+    # one of the slot's actual target workspaces (never "wherever the
+    # user currently is", which was the original bug) and none are ever
+    # left unplaced.
+    deadline = time.monotonic() + 8.0
+    while pending and time.monotonic() < deadline:
+        for address in sorted(client_addresses() - seen):
+            if not pending:
+                break
+            move(address, targets[pending.pop(0)])
+            seen.add(address)
+        if pending:
+            time.sleep(0.15)
 
 
 def cmd_fluid(args):
@@ -289,6 +423,13 @@ def build_parser():
     sub.add_parser("boot", help="launch bootSlot, else fluidSlot, else no-op").set_defaults(func=cmd_boot)
 
     sub.add_parser("list-apps", help="list installed apps as JSON [{name, command}], for building commands").set_defaults(func=cmd_list_apps)
+
+    # Internal: spawned by launch itself, not meant to be run by hand.
+    p = sub.add_parser("_place-windows", help=argparse.SUPPRESS)
+    p.add_argument("before")
+    p.add_argument("targets")
+    p.add_argument("pids")
+    p.set_defaults(func=cmd_place_windows)
 
     return parser
 
