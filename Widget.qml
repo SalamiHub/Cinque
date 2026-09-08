@@ -771,6 +771,7 @@ Panel {
                     spacing: Style.space(6)
 
                     Text {
+                      id: editCommandText
                       textFormat: Text.PlainText
                       text: modelData.command
                       color: root.foreground
@@ -778,18 +779,31 @@ Panel {
                       font.pixelSize: Style.font.caption
                       elide: Text.ElideRight
                       Layout.fillWidth: true
+                      // Layouts never shrink an item below its
+                      // Layout.minimumWidth, which defaults to implicitWidth
+                      // (the full unelided text width) -- without this, elide
+                      // never actually engages and the ws label/x button get
+                      // pushed out to the right instead.
+                      Layout.minimumWidth: 0
+
+                      HoverHandler { id: editCommandHover }
+                      ToolTip.visible: editCommandHover.hovered && editCommandText.truncated
+                      ToolTip.text: modelData.command
+                      ToolTip.delay: 500
                     }
                     Text {
                       text: "ws " + modelData.workspace
                       color: root.dim
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
+                      Layout.fillWidth: false
                     }
                     Button {
                       text: "✕"
                       horizontalPadding: Style.space(6)
                       verticalPadding: Style.space(2)
                       bordered: true
+                      Layout.fillWidth: false
                       onClicked: root.removeEditCommand(index)
                     }
                   }
