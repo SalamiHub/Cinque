@@ -227,6 +227,13 @@ Panel {
       commands: root.editCommands
     }
     fv.setText(JSON.stringify(obj, null, 2) + "\n")
+    // Update root.slots directly rather than relying solely on the reload
+    // below -- every other write path in this file (writeConfig) does the
+    // same, treating the FileView reload as a consistency pass, not the
+    // only route back to the in-memory state the detail view reads.
+    var arr = root.slots.slice()
+    arr[root.selectedSlot - 1] = obj
+    root.slots = arr
     root.statusNote = "Saved"
     clearNoteTimer.restart()
     root.view = "detail"
