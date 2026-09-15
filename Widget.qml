@@ -61,15 +61,12 @@ Panel {
   // time the edit view opens so newly installed apps show up without
   // restarting the shell.
   property var installedApps: []
-  // The empty-value entry is never in the picked/committed state on its own
-  // (addEditCommand's trim-and-check already no-ops on ""), it exists only
-  // so Dropdown's trigger has something other than blank to show before a
-  // real choice is made -- qs.Ui.Dropdown has no separate placeholder
-  // concept, its trigger just shows whichever option's label matches the
-  // current value.
+  // No placeholder-value entry needed here -- AppPicker (unlike qs.Ui.Dropdown)
+  // has a real placeholderText, so its trigger falls back to that on its own
+  // when value === "". "Custom command…" stays first; AppPicker pins it via
+  // pinnedValue so it survives filtering.
   readonly property var appPickerOptions: {
     var out = [
-      { value: "", label: "Pick an app" },
       { value: root.customCommandValue, label: "Custom command…" }
     ]
     for (var i = 0; i < root.installedApps.length; i++) {
@@ -843,13 +840,18 @@ Panel {
               Layout.fillWidth: true
               spacing: Style.space(4)
 
-              // Plain dropdown, not SearchableDropdown -- opens straight to
-              // the full scrollable option list, no filter field. That's
-              // deliberate: picking an app is a browse, not a search.
-              Dropdown {
+              // AppPicker combines browse and search in one widget, like
+              // Omarchy's own app launcher: click through the full list, or
+              // type to filter it live. See AppPicker.qml for why this is a
+              // Cinque-local fork of qs.Ui.SearchableDropdown rather than
+              // that component (or Omarchy's launcher) used directly.
+              AppPicker {
                 id: appPicker
                 Layout.fillWidth: true
                 showLabel: false
+                placeholderText: "Search apps…"
+                emptyText: "No matching apps"
+                pinnedValue: root.customCommandValue
                 options: root.appPickerOptions
                 foreground: root.foreground
                 accent: root.accentColor

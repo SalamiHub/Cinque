@@ -48,7 +48,7 @@ install_plugin() {
   mkdir -p "$PLUGIN_DIR"
   # A real copy, not a symlink: the Omarchy plugin validator rejects
   # symlinks anywhere inside a plugin folder.
-  cp -f "$SCRIPT_DIR/manifest.json" "$SCRIPT_DIR/Widget.qml" "$SCRIPT_DIR/BoundedProcess.qml" "$PLUGIN_DIR/"
+  cp -f "$SCRIPT_DIR/manifest.json" "$SCRIPT_DIR/Widget.qml" "$SCRIPT_DIR/BoundedProcess.qml" "$SCRIPT_DIR/AppPicker.qml" "$PLUGIN_DIR/"
 
   local validate_output
   if ! validate_output=$(omarchy plugin validate "$PLUGIN_DIR" 2>&1); then

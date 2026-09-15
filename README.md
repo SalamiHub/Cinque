@@ -207,13 +207,16 @@ edit view (rename, add/remove commands, Save). It reads
 unset boot-slot/fluid or to rename/edit commands, so those write the JSON
 files directly, in the same shape the CLI itself reads and writes.
 
-The edit view's add-command row is a `qs.Ui.SearchableDropdown` (the real
-Omarchy searchable-combobox component) populated from `quattro-workstation
-list-apps`, refreshed every time the edit view opens. Picking an app stores
-its already-clean `command` string; "Custom command…" (first in the list)
+The edit view's add-command row is `AppPicker.qml`, a Cinque-local fork of
+`qs.Ui.SearchableDropdown` (same trigger/popup, same theme tokens) that adds
+multi-term substring filtering — closer to how Omarchy's own Super+Space
+launcher matches — and a pinned option that survives filtering, so "Custom
+command…" stays visible no matter what's typed. It's populated from
+`quattro-workstation list-apps`, refreshed every time the edit view opens.
+Picking an app stores its already-clean `command` string; "Custom command…"
 reveals a plain text field for raw shell commands/scripts instead. Either way
 storage is just `{command, workspace}` — a slot's existing commands (never
-picked from the dropdown) edit exactly the same way, no migration needed.
+picked from the picker) edit exactly the same way, no migration needed.
 
 Built against the real, installed `davedes.mouse-keybind-settings` plugin as
 a reference for the manifest schema, the `qs.Ui`/`qs.Commons` theme tokens
